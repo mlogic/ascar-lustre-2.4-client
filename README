@@ -1,3 +1,15 @@
+This is the Ascar client for Lustre. Ascar, the Automated Contention
+Management for High-Performance Storage Systems, is designed by the
+Storage Systems Research Center (SSRC) in University of California,
+Santa Cruz.
+
+This client is based on Lustre 2.4.0 and follows the Lustre's license,
+which is GPL version 2. For more information about Ascar, please read
+the project page at: http://www.ssrc.ucsc.edu/ascar.html
+
+This client can be built and used as same as the original Lustre
+client. Following is Lustre's original README information.
+
 Instructions for building, configuring and running Lustre can be found at:
     http://wiki.whamcloud.com/display/PUB/Submitting+Changes
 and:
