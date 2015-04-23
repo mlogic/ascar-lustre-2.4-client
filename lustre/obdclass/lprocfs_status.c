@@ -31,6 +31,9 @@
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
+ * except for the Ascar routines (diff this file against a vanilla Lustre
+ * release to find out the changes), which are developed by Yan Li (<yanli@cs.ucsc.edu>)
+ * and copyrighted (c) 2013, 2014, 2015, University of California, Santa Cruz, CA, USA.
  * Lustre is a trademark of Sun Microsystems, Inc.
  *
  * lustre/obdclass/lprocfs_status.c
@@ -198,10 +201,10 @@ static ssize_t lprocfs_fops_read(struct file *f, char __user *buf,
         char *page, *start = NULL;
         int rc = 0, eof = 1, count;
 
-        if (*ppos >= CFS_PAGE_SIZE)
+        if (*ppos >= size)
                 return 0;
 
-        page = (char *)__get_free_page(GFP_KERNEL);
+        LIBCFS_ALLOC_ATOMIC(page, size);
         if (page == NULL)
                 return -ENOMEM;
 
@@ -212,14 +215,16 @@ static ssize_t lprocfs_fops_read(struct file *f, char __user *buf,
 
         OBD_FAIL_TIMEOUT(OBD_FAIL_LPROC_REMOVE, 10);
         if (dp->read_proc)
-                rc = dp->read_proc(page, &start, *ppos, CFS_PAGE_SIZE,
+                rc = dp->read_proc(page, &start, *ppos, size,
                                    &eof, dp->data);
         LPROCFS_EXIT();
         if (rc <= 0)
                 goto out;
 
         /* for lustre proc read, the read count must be less than PAGE_SIZE */
-        LASSERT(eof == 1);
+        /* Disabled by Ascar: it seems that Lustre didn't think any procfs
+         * output would be larger than one page, but our QoS rule does. */
+        /* LASSERT(eof == 1); */
 
         if (start == NULL) {
                 rc -= *ppos;
@@ -240,7 +245,7 @@ static ssize_t lprocfs_fops_read(struct file *f, char __user *buf,
         *ppos += count;
 
 out:
-        free_page((unsigned long)page);
+        LIBCFS_FREE(page, size);
         return rc;
 }
 
@@ -900,6 +905,12 @@ int lprocfs_rd_import(char *page, char **start, off_t off, int count,
 	int				j;
 	int				k;
 	int				rw	= 0;
+	struct qos_data_t		*qos;
+	__u64                           ack_ewma;
+	__u64                           sent_ewma;
+	int                             rtt_ratio100;
+	__u64                           read_bw;
+	__u64                           write_bw;
 
         LASSERT(obd != NULL);
         LPROCFS_CLIMP_CHECK(obd);
@@ -961,16 +972,34 @@ int lprocfs_rd_import(char *page, char **start, off_t off, int count,
                 ret.lc_sum = sum;
         } else
                 ret.lc_sum = 0;
+        qos = &obd->u.cli.qos;
+        spin_lock(&qos->lock);
+        ack_ewma  = qos_get_ewma_usec(&qos->ack_ewma);
+        sent_ewma = qos_get_ewma_usec(&qos->sent_ewma);
+	rtt_ratio100 = qos->rtt_ratio100;
+
+        /* Refresh bandwidth. If a long time has passed since we
+           received last req, bandwidth data is stale. */
+        calc_bandwidth(qos, OST_READ-OST_READ, 0);
+        calc_bandwidth(qos, OST_WRITE-OST_READ, 0);
+
+        read_bw   = qos->bw_last_sec[0];
+        write_bw  = qos->bw_last_sec[1];
+        spin_unlock(&qos->lock);
         i += snprintf(page + i, count - i,
                       "    rpcs:\n"
                       "       inflight: %u\n"
                       "       unregistering: %u\n"
                       "       timeouts: %u\n"
-                      "       avg_waittime: "LPU64" %s\n",
+                      "       avg_waittime: "LPU64" %s\n"
+                      "       ack_ewma: "LPU64" usec\n"
+                      "       sent_ewma: "LPU64" usec\n"
+		      "       rtt_ratio100: %d\n",
                       cfs_atomic_read(&imp->imp_inflight),
                       cfs_atomic_read(&imp->imp_unregistering),
                       cfs_atomic_read(&imp->imp_timeouts),
-		      ret.lc_sum, header->lc_units);
+                     ret.lc_sum, header->lc_units,
+		      ack_ewma, sent_ewma, rtt_ratio100);
 
         k = 0;
         for(j = 0; j < IMP_AT_MAX_PORTALS; j++) {
@@ -1030,6 +1059,10 @@ int lprocfs_rd_import(char *page, char **start, off_t off, int count,
                                               k / j, (100 * k / j) % 100);
                 }
         }
+        i += snprintf(page + i, count - i,
+                      "    read_bandwidth: "LPU64"\n", read_bw);
+        i += snprintf(page + i, count - i,
+                      "    write_bandwidth: "LPU64"\n", write_bw);
 
 out_climp:
         LPROCFS_CLIMP_EXIT(obd);

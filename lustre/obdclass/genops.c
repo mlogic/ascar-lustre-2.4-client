@@ -30,7 +30,10 @@
  * Copyright (c) 2011, 2013, Intel Corporation.
  */
 /*
- * This file is part of Lustre, http://www.lustre.org/
+ * This file is part of Lustre, http://www.lustre.org/,
+ * except for the Ascar routines (diff this file against a vanilla Lustre
+ * release to find out the changes), which are developed by Yan Li (<yanli@cs.ucsc.edu>)
+ * and copyrighted (c) 2013, 2014, 2015, University of California, Santa Cruz, CA, USA.
  * Lustre is a trademark of Sun Microsystems, Inc.
  *
  * lustre/obdclass/genops.c
@@ -274,6 +277,26 @@ int class_unregister_type(const char *name)
 } /* class_unregister_type */
 EXPORT_SYMBOL(class_unregister_type);
 
+static void init_time_ewma(struct time_ewma *ewma)
+{
+	ewma->alpha_inv = 8;
+	ewma->ea = 0;
+	ewma->last_time.tv_sec = 0;
+	ewma->last_time.tv_usec = 0;
+}
+
+static void init_qos(struct client_obd *cli)
+{
+	struct qos_data_t *qos = &cli->qos;
+
+	init_time_ewma(&qos->ack_ewma);
+	init_time_ewma(&qos->sent_ewma);
+
+	client_obd_list_lock(&cli->cl_loi_list_lock);
+	qos->max_rpc_in_flight100 = cli->cl_max_rpcs_in_flight * 100;
+	client_obd_list_unlock(&cli->cl_loi_list_lock);
+}
+
 /**
  * Create a new obd device.
  *
@@ -339,6 +362,7 @@ struct obd_device *class_newdev(const char *type_name, const char *name)
                         result->obd_type = type;
                         strncpy(result->obd_name, name,
                                 sizeof(result->obd_name) - 1);
+                        init_qos(&result->u.cli);
                         obd_devs[i] = result;
                 }
         }

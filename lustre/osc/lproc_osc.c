@@ -31,6 +31,9 @@
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
+ * except for the Ascar routines (diff this file against a vanilla Lustre
+ * release to find out the changes), which are developed by Yan Li (<yanli@cs.ucsc.edu>)
+ * and copyrighted (c) 2013, 2014, 2015, University of California, Santa Cruz, CA, USA.
  * Lustre is a trademark of Sun Microsystems, Inc.
  */
 #define DEBUG_SUBSYSTEM S_CLASS
@@ -42,6 +45,7 @@
 #include <lprocfs_status.h>
 #include <linux/seq_file.h>
 #include "osc_internal.h"
+#include <ascar.h>
 
 #ifdef LPROCFS
 static int osc_rd_active(char *page, char **start, off_t off,
@@ -97,6 +101,7 @@ static int osc_wr_max_rpcs_in_flight(struct file *file, const char *buffer,
         struct client_obd *cli = &dev->u.cli;
         struct ptlrpc_request_pool *pool = cli->cl_import->imp_rq_pool;
         int val, rc;
+        struct qos_data_t *qos = &cli->qos;
 
         rc = lprocfs_write_helper(buffer, count, &val);
         if (rc)
@@ -114,6 +119,11 @@ static int osc_wr_max_rpcs_in_flight(struct file *file, const char *buffer,
         client_obd_list_unlock(&cli->cl_loi_list_lock);
 
         LPROCFS_CLIMP_EXIT(dev);
+
+        /* Update the value tracked by QoS routines too */
+        spin_lock(&qos->lock);
+        qos->max_rpc_in_flight100 = val * 100;
+        spin_unlock(&qos->lock);
         return count;
 }
 
@@ -496,6 +506,160 @@ static int lprocfs_osc_wr_max_pages_per_rpc(struct file *file,
 	return count;
 }
 
+static int osc_rd_min_brw_rpc_gap(char *page, char **start, off_t off,
+                                     int count, int *eof, void *data)
+{
+        struct obd_device *dev = data;
+        struct client_obd *cli = &dev->u.cli;
+        struct qos_data_t *qos = &cli->qos;
+        int rc;
+
+        spin_lock(&qos->lock);
+        /* FB#2479: sometimes reading this file gets two numbers on two lines, why? */
+        rc = snprintf(page, count, "%u\n", qos->min_usec_between_rpcs);
+        spin_unlock(&qos->lock);
+        return rc;
+}
+
+static int osc_wr_min_brw_rpc_gap(struct file *file, const char *buffer,
+                                     unsigned long count, void *data)
+{
+        struct obd_device *dev = data;
+        struct client_obd *cli = &dev->u.cli;
+        struct qos_data_t *qos = &cli->qos;
+        int val;
+        int rc;
+
+        rc = lprocfs_write_helper(buffer, count, &val);
+        if (val < 0)
+                return -ERANGE;
+
+        spin_lock(&qos->lock);
+        qos->min_usec_between_rpcs = val;
+        spin_unlock(&qos->lock);
+        return count;
+}
+
+static int osc_rd_qos_rules(char *page, char **start, off_t off,
+                            int count, int *eof, void *data)
+{
+	struct obd_device *dev = data;
+	struct client_obd *cli = &dev->u.cli;
+	struct qos_data_t *qos = &cli->qos;
+	int bytes_needed;
+	int i;
+	struct qos_rule_t *r;
+	char *kernbuf = NULL;
+	int kernbuf_size = 0;
+	int free_buf_size;
+	int rc;
+
+	spin_lock(&qos->lock);
+	do {
+		free_buf_size = kernbuf_size;
+		/* First we try to run through the print process to determine the size of output buffer needed,
+		 * on the second loop we do the actual output process
+		 */
+		if (0 == qos->rule_no || NULL == qos->rules || 0 == qos->min_gap_between_updating_mrif) {
+			bytes_needed = snprintf(kernbuf, free_buf_size, "0\n");
+			/* Make sure the upcoming for loop doesn't run */
+			qos->rule_no = 0;
+		} else {
+			bytes_needed = snprintf(kernbuf, free_buf_size, "%d,%d\n", qos->rule_no, 1000000 / qos->min_gap_between_updating_mrif);
+		}
+		for (i = 0; i < qos->rule_no; ++i) {
+			if (bytes_needed < kernbuf_size) {
+				free_buf_size = kernbuf_size - bytes_needed;
+			} else {
+				free_buf_size = 0;
+			}
+			r = &qos->rules[i];
+			bytes_needed += snprintf(kernbuf + bytes_needed, free_buf_size,
+						 LPU64","LPU64","LPU64","LPU64",%u,%u,%d,%d,%u,%d,"LPU64","LPU64",%u\n",
+						 r->ack_ewma_lower,  r->ack_ewma_upper,
+						 r->send_ewma_lower, r->send_ewma_upper,
+						 r->rtt_ratio100_lower, r->rtt_ratio100_upper,
+						 r->m100, r->b100, r->tau,
+						 r->used_times,
+						 r->ack_ewma_avg, r->send_ewma_avg, r->rtt_ratio100_avg);
+		}
+		/* NULL ending */
+		bytes_needed += 1;
+		if (bytes_needed > kernbuf_size) {
+			if (kernbuf) {
+				LIBCFS_FREE(kernbuf, kernbuf_size);
+				kernbuf = NULL;
+			}
+			kernbuf_size = bytes_needed;
+			LIBCFS_ALLOC_ATOMIC(kernbuf, kernbuf_size);
+		} else {
+			break;
+		}
+	} while (1);
+	spin_unlock(&qos->lock);
+
+	if (off >= bytes_needed) {
+		*eof = 1;
+		rc = 0;
+	} else {
+		rc = snprintf(page, count, "%s", kernbuf + off);
+		if (rc >= count)
+			*eof = 0;
+		else
+			*eof = 1;
+	}
+
+	if (kernbuf) {
+		LIBCFS_FREE(kernbuf, kernbuf_size);
+	}
+	/* must set start to page or the outer layer wrapper from Lustre will
+	 * mess up with our rc. Obviously they didn't think a procfs file can
+	 * be larger than a page. */
+	*start = page;
+	return rc;
+}
+
+static int osc_wr_qos_rules(struct file *file, const char *buffer,
+                            unsigned long count, void *data)
+{
+	struct obd_device *dev = data;
+	struct client_obd *cli = &dev->u.cli;
+	struct qos_data_t *qos = &cli->qos;
+	int rc;
+	char *kernbuf = NULL;
+
+	LIBCFS_ALLOC_ATOMIC(kernbuf, count + 1);
+	if (NULL == kernbuf) {
+		return -ENOMEM;
+	}
+	if (cfs_copy_from_user(kernbuf, buffer, count)) {
+		rc = -EFAULT;
+		goto out_free_kernbuf;
+	}
+	/* Make sure the buf ends with a null so that sscanf won't overread */
+	kernbuf[count] = '\0';
+
+	spin_lock(&qos->lock);
+	/* parse_qos_rules() will free exisiting rules in qos before starting parsing */
+	rc = parse_qos_rules(kernbuf, qos);
+	if (0 == rc) {
+		/* return the number of chars processed on a success parsing */
+		rc = count;
+	}
+	qos->ack_ewma.ea = 0;
+	qos->ack_ewma.last_time.tv_sec = 0;
+	qos->ack_ewma.last_time.tv_usec = 0;
+	qos->sent_ewma.ea = 0;
+	qos->sent_ewma.last_time.tv_sec = 0;
+	qos->sent_ewma.last_time.tv_usec = 0;
+	qos->rtt_ratio100 = 0;
+	qos->smallest_rtt = 0;
+	spin_unlock(&qos->lock);
+out_free_kernbuf:
+	LIBCFS_FREE(kernbuf, count + 1);
+	return rc;
+}
+
 static struct lprocfs_vars lprocfs_osc_obd_vars[] = {
         { "uuid",            lprocfs_rd_uuid,        0, 0 },
         { "ping",            0, lprocfs_wr_ping,     0, 0, 0222 },
@@ -536,6 +700,8 @@ static struct lprocfs_vars lprocfs_osc_obd_vars[] = {
         { "state",           lprocfs_rd_state,         0, 0 },
         { "pinger_recov",    lprocfs_rd_pinger_recov,
                              lprocfs_wr_pinger_recov,  0, 0 },
+        { "qos_rules",       osc_rd_qos_rules, osc_wr_qos_rules, 0 },
+        { "min_brw_rpc_gap", osc_rd_min_brw_rpc_gap, osc_wr_min_brw_rpc_gap, 0 },
         { 0 }
 };
 
