@@ -60,7 +60,7 @@ TAGS
 /config.h
 /config.h.in
 /INSTALL
-/lustre.spec
+/lustre*.spec
 /lustre*.tar.gz
 /mkinstalldirs
 /Module.markers
