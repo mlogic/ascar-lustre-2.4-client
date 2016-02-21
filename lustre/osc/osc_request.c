@@ -64,6 +64,7 @@
 #include <lustre_fid.h>
 #include "osc_internal.h"
 #include "osc_cl_internal.h"
+#include <ascar.h>
 
 static void osc_release_ppga(struct brw_page **ppga, obd_count count);
 static int brw_interpret(const struct lu_env *env,

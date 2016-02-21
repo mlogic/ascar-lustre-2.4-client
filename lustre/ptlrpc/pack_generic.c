@@ -1728,6 +1728,7 @@ void lustre_swab_connect(struct obd_connect_data *ocd)
 
 void lustre_swab_obdo (struct obdo  *o)
 {
+        __u64 t;
         __swab64s (&o->o_valid);
 	lustre_swab_ost_id(&o->o_oi);
         __swab64s (&o->o_parent_seq);
@@ -1755,9 +1756,15 @@ void lustre_swab_obdo (struct obdo  *o)
         __swab64s (&o->o_data_version);
         CLASSERT(sizeof(o->sent_time.tv_sec) == 8);
         CLASSERT(sizeof(o->sent_time.tv_usec) == 8);
-        CLASSERT(offsetof(typeof(*o), send_time) % 8 == 0);
-        __swab64s (&o->sent_time.tv_sec);
-        __swab64s (&o->sent_time.tv_usec);
+        /* we have to use the temp variable here because casting
+           &sent_time.tv_sec to (__u64t*) would trigger a gcc warning on strict-
+           aliasing */
+        t = o->sent_time.tv_sec;
+        __swab64s (&t);
+        o->sent_time.tv_sec = t;
+        t = o->sent_time.tv_usec;
+        __swab64s (&t);
+        o->sent_time.tv_usec = t;
         CLASSERT(offsetof(typeof(*o), o_padding_6) != 0);
 
 }
