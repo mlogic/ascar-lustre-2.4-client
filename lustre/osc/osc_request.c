@@ -2094,7 +2094,9 @@ out:
 	spin_unlock(&qos->lock);
 
 	if (-1 != new_mrif) {   /* -1 means no change needed */
+#ifdef __KERNEL__
 		LPROCFS_CLIMP_CHECK(obd);
+#endif
 		pool = cli->cl_import->imp_rq_pool;
 		if (pool && new_mrif > cli->cl_max_rpcs_in_flight)
 			pool->prp_populate(pool,
@@ -2103,8 +2105,9 @@ out:
 		client_obd_list_lock(&cli->cl_loi_list_lock);
 		cli->cl_max_rpcs_in_flight = new_mrif;
 		client_obd_list_unlock(&cli->cl_loi_list_lock);
-
+#ifdef __KERNEL__
 		LPROCFS_CLIMP_EXIT(obd);
+#endif
 	}
 	return 0;
 }
@@ -2121,7 +2124,7 @@ static int brw_interpret(const struct lu_env *env,
 
 	qos_adjust(req->rq_import->imp_obd,
 		   &req->rq_arrival_time,
-	           &aa->aa_oa->sent_time,
+	           &aa->aa_oa->o_sent_time,
 	           lustre_msg_get_opc(req->rq_reqmsg) - OST_READ,
 	           req->rq_bulk->bd_nob_transferred);
 
@@ -2354,7 +2357,7 @@ int osc_build_rpc(const struct lu_env *env, struct client_obd *cli,
 	cfs_list_splice_init(ext_list, &aa->aa_exts);
 	aa->aa_clerq = clerq;
 	/* sent_time is used by QoS */
-	cfs_gettimeofday(&aa->aa_oa->sent_time);
+	cfs_gettimeofday(&aa->aa_oa->o_sent_time);
 
 	/* queued sync pages can be torn down while the pages
 	 * were between the pending list and the rpc */

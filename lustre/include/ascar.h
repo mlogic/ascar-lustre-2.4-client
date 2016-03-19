@@ -45,14 +45,15 @@
 
 /* We work with kernel only */
 #ifdef __KERNEL__
-#  include <linux/types.h>
-#  include <linux/time.h>
-#  include <asm/param.h>
-#  include <libcfs/libcfs.h>
-#  include <linux/delay.h>
+# include <linux/types.h>
+# include <linux/time.h>
+# include <asm/param.h>
+# include <libcfs/libcfs.h>
+# include <linux/delay.h>
 #else /* __KERNEL__ */
-#  define HZ 100
-#  define ONE_MILLION 1000000
+# define HZ 100
+# define ONE_MILLION 1000000
+# include <liblustre.h>
 #endif
 
 #define EWMA_ALPHA_INV (8)
@@ -115,8 +116,7 @@ static inline __u64 qos_get_ewma_usec(const struct time_ewma *ewma) {
 
 int parse_qos_rules(const char *buf, struct qos_data_t *qos);
 
-/* The following functions work in kernel only, no user space test cases for them yet */
-#ifdef __KERNEL__
+/* No user space test cases for them yet */
 /* Lock of qos must be held. op == 0 for read, 1 for write */
 static inline void calc_bandwidth(struct qos_data_t *qos, int op, int bytes_transferred)
 {
@@ -139,6 +139,19 @@ static inline void calc_bandwidth(struct qos_data_t *qos, int op, int bytes_tran
 	}
 	/* Ignore cases when now.tv_sec < qos->last_req_sec */
 }
+
+#ifndef __KERNEL__
+static inline void udelay(long u) {
+	(void)u;
+}
+static inline void usleep_range(long u, long v) {
+	(void)u;
+	(void)v;
+}
+static inline void msleep(long u) {
+	(void)u;
+}
+#endif
 
 static inline void qos_throttle(struct qos_data_t *qos)
 {
@@ -175,5 +188,5 @@ out:
 		msleep(need_sleep_usec / 1000);
 	}
 }
-#endif /* __KERNEL__ */
+
 #endif /* ASCAR_H_ */

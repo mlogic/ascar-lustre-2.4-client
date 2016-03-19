@@ -556,8 +556,7 @@ check_obdo(void)
 	CHECK_MEMBER(obdo, o_uid_h);
 	CHECK_MEMBER(obdo, o_gid_h);
 	CHECK_MEMBER(obdo, o_data_version);
-	CHECK_MEMBER(obdo, o_padding_4);
-	CHECK_MEMBER(obdo, o_padding_5);
+	CHECK_MEMBER(obdo, o_sent_time);
 	CHECK_MEMBER(obdo, o_padding_6);
 
 	CHECK_DEFINE_64X(OBD_MD_FLID);

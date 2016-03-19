@@ -43,6 +43,7 @@
 
 #include "osc_cl_internal.h"
 #include "osc_internal.h"
+#include <ascar.h>
 
 static int extent_debug; /* set it to be true for more debug */
 
