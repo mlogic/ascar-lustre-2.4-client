@@ -7,9 +7,11 @@ This client is based on Lustre 2.4.0 and follows the Lustre's license,
 which is GPL version 2. For more information about ASCAR, please read
 the project page at: http://www.ssrc.ucsc.edu/ascar.html
 
-The following installation instruction is based on the official
-guide: [Walk-thru- Build Lustre MASTER on RHEL 6.4/CentOS 6.4 from Whamcloud git](https://wiki.hpdd.intel.com/pages/viewpage.action?pageId=8126821).
-It has been tested with Lustre 2.4 on CentOS 6.7.
+The following installation instruction is based on the official guide:
+[Walk-thru- Build Lustre MASTER on RHEL 6.4/CentOS 6.4 from Whamcloud
+git](https://wiki.hpdd.intel.com/pages/viewpage.action?pageId=8126821)
+(use this [archive](https://archive.fo/rfqVH) if the link stopped
+working).  It has been tested with Lustre 2.4 on CentOS 6.7.
 
 Requirements
 ============
